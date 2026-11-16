@@ -19,16 +19,21 @@ def shared_mlp(in_channels, widths):
 
 
 class GridSetAbstraction(nn.Module):
-    def __init__(self, in_channels, widths, shift):
+    def __init__(self, in_channels, widths, shift, abs_coords=False):
         super().__init__()
         self.shift = shift
-        self.mlp = shared_mlp(in_channels + 3, widths)
+        self.abs_coords = abs_coords
+        self.mlp = shared_mlp(in_channels + (6 if abs_coords else 3), widths)
 
     def forward(self, grid, coord, feat, batch):
         parents, cluster, batch = grid_cluster(grid, batch, self.shift)
         center = scatter(coord, cluster, len(parents), "mean")
-        local = coord - center[cluster]
-        x = self.mlp(local if feat is None else torch.cat([local, feat], dim=1))
+        x = [coord - center[cluster]]
+        if self.abs_coords:
+            x.append(coord)
+        if feat is not None:
+            x.append(feat)
+        x = self.mlp(torch.cat(x, dim=1))
         return parents, center, scatter(x, cluster, len(parents), "amax"), batch
 
 
@@ -46,12 +51,13 @@ class PointNet2Grid(nn.Module):
         num_heads=(8, 16),
         patch_size=8,
         pe=None,
+        abs_coords=False,
     ):
         super().__init__()
         self.grid_size = grid_size
         self.pe = pe
         channels = (0, *[w[-1] for w in widths])
-        self.sa = nn.ModuleList([GridSetAbstraction(c, w, s) for c, w, s in zip(channels[:-1], widths, shifts)])
+        self.sa = nn.ModuleList([GridSetAbstraction(c, w, s, abs_coords) for c, w, s in zip(channels[:-1], widths, shifts)])
         self.global_mlp = shared_mlp(channels[-1] + 3, global_widths)
         features = (global_widths[-1], *head)
         self.head = nn.Sequential(
@@ -59,7 +65,7 @@ class PointNet2Grid(nn.Module):
             nn.Linear(head[-1], num_classes),
         )
         self.blocks = nn.ModuleList([
-            nn.ModuleList([Block(w[-1], h, patch_size, pe == "rope") for _ in range(d)])
+            nn.ModuleList([Block(w[-1], h, patch_size) for _ in range(d)])
             for w, h, d in zip(widths, num_heads, attn_depths)
         ])
 
@@ -78,6 +84,6 @@ class PointNet2Grid(nn.Module):
             if self.pe == "ape":
                 feat = feat + sincos(pos.float(), feat.shape[1])
             for i, block in enumerate(blocks):
-                feat = block(feat, pos, batch, order[i % len(order)], inverse[i % len(order)])
+                feat = block(feat, batch, order[i % len(order)], inverse[i % len(order)])
         x = self.global_mlp(torch.cat([coord, feat], dim=1))
         return self.head(scatter(x, batch, len(points), "amax"))

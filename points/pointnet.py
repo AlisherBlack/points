@@ -1,4 +1,3 @@
-import reticulae as R
 import torch
 from torch import nn
 
@@ -36,34 +35,12 @@ class EdgeConv(nn.Module):
         return edge_conv(x.transpose(1, 2), self.k, self.h).transpose(1, 2)
 
 
-class SubMStem(nn.Module):
-    def __init__(self, in_channels, out_channels, voxel_size):
-        super().__init__()
-        self.voxel_size = voxel_size
-        self.conv = R.SubMConv3d(in_channels, out_channels, 3, bias=False)
-        self.bn = nn.BatchNorm1d(out_channels)
-
-    def forward(self, x):                                                    # x: (B, C, n)
-        B, C, n = x.shape
-        points = x.transpose(1, 2)
-        grid = ((points[..., :3] - points[..., :3].amin(1, keepdim=True)) / self.voxel_size).long()
-        batch = torch.arange(B, device=x.device)[:, None, None].expand(B, n, 1)
-        voxels, inverse = torch.unique(torch.cat([batch, grid], -1).reshape(-1, 4), dim=0, return_inverse=True)
-        feats = points.new_zeros(len(voxels), C).index_reduce_(0, inverse, points.reshape(-1, C), "mean", include_self=False)
-        sparse = R.SparseTensor(feats, voxels, (grid.amax((0, 1)) + 1).tolist(), B)
-        y = torch.relu(self.bn(self.conv(sparse).features))
-        return y[inverse].reshape(B, n, -1).transpose(1, 2)
-
-
 class PointNet(nn.Module):
-    def __init__(self, num_classes=40, in_channels=3, widths=(64, 64, 64, 128, 1024), head=(512, 256), dropout=0.3, edge_layers=0, k=20, stem_voxel=None):
+    def __init__(self, num_classes=40, in_channels=3, widths=(64, 64, 64, 128, 1024), head=(512, 256), dropout=0.3, edge_layers=0, k=20):
         super().__init__()
         channels = (in_channels, *widths)
         layers = list(zip(channels[:-1], channels[1:]))
-        stem = [SubMStem(*layers[0], stem_voxel)] if stem_voxel else []
-        layers = layers[len(stem):]
         self.point_mlp = nn.Sequential(
-            *stem,
             *[EdgeConv(a, b, k) for a, b in layers[:edge_layers]],
             *[conv_bn_relu(a, b) for a, b in layers[edge_layers:]],
         )
