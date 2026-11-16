@@ -53,7 +53,7 @@ def evaluate(model, loader, device):
     return total_loss / total, correct / total
 
 
-def fit(model, train_set, test_set, device, epochs=200, batch_size=32, lr=1e-3, block_lr=None):
+def fit(model, train_set, test_set, device, epochs=200, batch_size=32, lr=1e-3, weight_decay=1e-4, block_lr=None):
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True, drop_last=True)
     test_loader = DataLoader(test_set, batch_size=128)
     model.to(device)
@@ -64,7 +64,7 @@ def fit(model, train_set, test_set, device, epochs=200, batch_size=32, lr=1e-3, 
             {"params": [p for n, p in named if "blocks." not in n]},
             {"params": [p for n, p in named if "blocks." in n], "lr": block_lr},
         ]
-    optimizer = torch.optim.Adam(params, lr=lr)
+    optimizer = torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=20, gamma=0.7)
 
     history = []
