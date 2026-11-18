@@ -19,18 +19,15 @@ def shared_mlp(in_channels, widths):
 
 
 class GridSetAbstraction(nn.Module):
-    def __init__(self, in_channels, widths, shift, abs_coords=False):
+    def __init__(self, in_channels, widths, shift):
         super().__init__()
         self.shift = shift
-        self.abs_coords = abs_coords
-        self.mlp = shared_mlp(in_channels + (6 if abs_coords else 3), widths)
+        self.mlp = shared_mlp(in_channels + 3, widths)
 
     def forward(self, grid, coord, feat, batch):
         parents, cluster, batch = grid_cluster(grid, batch, self.shift)
         center = scatter(coord, cluster, len(parents), "mean")
         x = [coord - center[cluster]]
-        if self.abs_coords:
-            x.append(coord)
         if feat is not None:
             x.append(feat)
         x = self.mlp(torch.cat(x, dim=1))
@@ -51,13 +48,12 @@ class PointNet2Grid(nn.Module):
         num_heads=(8, 16),
         patch_size=8,
         pe=None,
-        abs_coords=False,
     ):
         super().__init__()
         self.grid_size = grid_size
         self.pe = pe
         channels = (0, *[w[-1] for w in widths])
-        self.sa = nn.ModuleList([GridSetAbstraction(c, w, s, abs_coords) for c, w, s in zip(channels[:-1], widths, shifts)])
+        self.sa = nn.ModuleList([GridSetAbstraction(c, w, s) for c, w, s in zip(channels[:-1], widths, shifts)])
         self.global_mlp = shared_mlp(channels[-1] + 3, global_widths)
         features = (global_widths[-1], *head)
         self.head = nn.Sequential(
